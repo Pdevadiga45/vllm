@@ -520,15 +520,14 @@ class FakeNixlConnectorWorker(NixlConnectorWorker):
         self.block_len_per_layer = [slot_size_bytes * self.block_size]
         self.num_blocks = self.kv_cache_config.num_blocks
         self.num_regions = 1
-        self.region_strides = list(self.block_len_per_layer)
+        self.block_stride_per_layer = list(self.block_len_per_layer)
         self.region_num_blocks = [self.num_blocks]
         self.region_group_ids = [0]
-        self.region_block_sizes = [self.block_size]
+        self.region_mem_types = [self.nixl_memory_type]
         self.dst_num_blocks[self.engine_id] = self.num_blocks
         self.dst_region_num_blocks[self.engine_id] = self.region_num_blocks
         self.dst_region_group_ids[self.engine_id] = self.region_group_ids
-        self.dst_region_block_sizes[self.engine_id] = self.region_block_sizes
-        self.dst_region_split_ratios[self.engine_id] = [1]
+        self.dst_region_mem_types[self.engine_id] = self.region_mem_types
 
         assert expected_engine_id == self.REMOTE_ENGINE_ID
 
@@ -565,10 +564,9 @@ class FakeNixlConnectorWorker(NixlConnectorWorker):
                     ssm_sizes=(0, 0),
                     attn_backend_name=self.backend_name,
                     physical_blocks_per_logical_kv_block=1,
-                    region_strides=self.region_strides,
                     region_num_blocks=self.region_num_blocks,
                     region_group_ids=self.region_group_ids,
-                    region_block_sizes=self.region_block_sizes,
+                    region_mem_types=self.region_mem_types,
                 ),
                 remote_tp_rank=remote_tp_rank,
                 remote_tp_size=remote_tp_size,
@@ -632,72 +630,6 @@ class TestNixlHandshake:
         done_sending, done_recving = connector.get_finished(set())
         assert done_sending == ({"sent"} if pcp_rank == 0 else set())
         assert done_recving == set()
-
-    @patch(
-        "vllm.distributed.kv_transfer.kv_connector.v1.nixl.base_worker.NixlWrapper",
-        FakeNixlWrapper,
-    )
-    @pytest.mark.parametrize(
-        ("local_region_block_size", "remote_region_block_size", "remote_block_len"),
-        [(8, 16, 8192), (16, 8, 4096)],
-    )
-    def test_handshake_accepts_integer_related_region_block_sizes(
-        self,
-        default_vllm_config,
-        dist_init,
-        local_region_block_size,
-        remote_region_block_size,
-        remote_block_len,
-    ):
-        vllm_config = create_vllm_config()
-        connector = NixlConnector(
-            vllm_config,
-            KVConnectorRole.WORKER,
-            make_kv_cache_config(block_size=16),
-        )
-        connector.connector_worker = FakeNixlConnectorWorker(
-            vllm_config, connector.engine_id, hand_shake_latency=0
-        )
-        worker = connector.connector_worker
-        worker.block_len_per_layer = [4096]
-        worker._region_is_mla = [True]
-        worker.region_num_blocks = [2]
-        worker.region_group_ids = [0]
-        worker.region_block_sizes = [local_region_block_size]
-        worker.num_blocks = 2
-        worker.num_regions = 1
-        worker.num_descs = 2
-        worker.dst_num_blocks[worker.engine_id] = worker.num_blocks
-        worker.src_blocks_data = np.array(
-            [(0, 4096, worker.tp_rank), (4096, 4096, worker.tp_rank)],
-            dtype=np.uint64,
-        )
-
-        meta = NixlAgentMetadata(
-            engine_id=FakeNixlConnectorWorker.REMOTE_ENGINE_ID,
-            agent_metadata=FakeNixlWrapper.AGENT_METADATA,
-            kv_caches_base_addr=[0],
-            device_id=0,
-            num_blocks=2,
-            block_lens=[remote_block_len],
-            kv_cache_layout=worker.kv_cache_layout,
-            block_size=worker.block_size,
-            ssm_sizes=(0, 0),
-            attn_backend_name=worker.backend_name,
-            physical_blocks_per_logical_kv_block=1,
-            region_strides=[remote_block_len],
-            region_num_blocks=[2],
-            region_group_ids=[0],
-            region_block_sizes=[remote_region_block_size],
-        )
-
-        worker.add_remote_agent(meta, remote_tp_size=1)
-
-        assert worker.dst_region_split_ratios[meta.engine_id] == [
-            remote_region_block_size // local_region_block_size
-            if remote_region_block_size > local_region_block_size
-            else 1
-        ]
 
     @patch(
         "vllm.distributed.kv_transfer.kv_connector.v1.nixl.base_worker.NixlWrapper",
@@ -1260,7 +1192,6 @@ class TestNixlHandshake:
             attn_backend_name=worker.backend_name,
             physical_blocks_per_logical_kv_block=1,
             region_num_blocks=None,
-            region_strides=None,
         )
 
         assert worker._build_fa_remote(plan, meta, block_size_ratio=1).tolist() == [
