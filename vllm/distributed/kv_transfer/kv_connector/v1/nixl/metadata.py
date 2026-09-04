@@ -47,8 +47,9 @@ PUSH_REG_NOTIF_PREFIX = b"PUSH_REG:"
 #   9: Add block_strides
 #  10: Add dense virtual transfer pages for compressed MLA caches
 #  11: Add per-region transfer geometry to NixlAgentMetadata
+#  12: Add per-region memory types to NixlAgentMetadata
 #
-NIXL_CONNECTOR_VERSION: int = 11
+NIXL_CONNECTOR_VERSION: int = 12
 
 
 @dataclass
@@ -65,11 +66,10 @@ class NixlAgentMetadata:
     ssm_sizes: tuple[int, int]
     attn_backend_name: str
     physical_blocks_per_logical_kv_block: int
-    region_strides: list[int] | None = None
     region_num_blocks: list[int] | None = None
     region_group_ids: list[int] | None = None
-    region_block_sizes: list[int] | None = None
     region_names: list[str] | None = None
+    region_mem_types: list[str] | None = None
     dcp_size: int = 1
     pcp_size: int = 1
 
@@ -247,9 +247,6 @@ class ReqMeta:
     remote_block_size: int | None = None
     # Remote producer pipeline-parallel size (push mode, D side).
     pp_size: int = 1
-    # Stable HiSparse source blocks used when the imported prefix cannot be
-    # admitted fully resident on the decoder.
-    hisparse_host_block_ids: list[int] | None = None
 
 
 class NixlConnectorMetadata(KVConnectorMetadata):
@@ -278,7 +275,6 @@ class NixlConnectorMetadata(KVConnectorMetadata):
         self,
         local_block_ids: BlockIds,
         kv_transfer_params: dict[str, Any],
-        hisparse_host_block_ids: list[int] | None = None,
         local_num_computed_blocks: tuple[int, ...] = (),
     ) -> ReqMeta:
         return ReqMeta(
@@ -289,7 +285,6 @@ class NixlConnectorMetadata(KVConnectorMetadata):
             dcp_size=kv_transfer_params.get("dcp_size", 1),
             remote_block_size=kv_transfer_params.get("remote_block_size"),
             pp_size=kv_transfer_params.get("pp_size", 1),
-            hisparse_host_block_ids=hisparse_host_block_ids,
             local_num_computed_blocks=local_num_computed_blocks,
         )
 
@@ -308,13 +303,11 @@ class NixlConnectorMetadata(KVConnectorMetadata):
         request_id: ReqId,
         local_block_ids: BlockIds,
         kv_transfer_params: dict[str, Any],
-        hisparse_host_block_ids: list[int] | None = None,
         local_num_computed_blocks: tuple[int, ...] = (),
     ):
         req = self._add_new_req(
             local_block_ids,
             kv_transfer_params,
-            hisparse_host_block_ids,
             local_num_computed_blocks,
         )
         req.remote = RemoteMeta(
