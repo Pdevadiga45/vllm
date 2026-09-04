@@ -135,6 +135,10 @@ class NixlPushConnectorWorker(NixlBaseConnectorWorker):
 
     def register_kv_caches(self, kv_caches: dict[str, "torch.Tensor"]):
         super().register_kv_caches(kv_caches)
+        if self._mixed_mem_types:
+            raise NotImplementedError(
+                "NixlPushConnector does not support mixed-memory KV caches"
+            )
         if self._push_writer_thread is None:
             self._push_writer_thread = threading.Thread(
                 target=self._push_writer_loop,

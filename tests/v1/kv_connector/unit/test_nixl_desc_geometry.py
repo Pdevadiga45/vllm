@@ -110,7 +110,7 @@ def test_local_descriptors_follow_each_region_pool_capacity():
     worker.transfer_topo = MagicMock()
     worker.device_id = 0
     worker.block_len_per_layer = [16, 16]
-    worker.region_strides = [16, 16]
+    worker.block_stride_per_layer = [16, 16]
     worker.region_num_blocks = [2, 3]
 
     descriptors = worker._build_fa_local([100, 1000], block_size_ratio=1)
@@ -177,8 +177,10 @@ def test_overlaid_transfer_groups_share_region_geometry():
     worker.dst_num_blocks = {}
     worker.dst_region_num_blocks = {}
     worker.dst_region_group_ids = {}
-    worker.dst_region_block_sizes = {}
-    worker.dst_region_split_ratios = {}
+    worker.dst_region_mem_types = {}
+    worker._desc_is_dram_by_block_size = {}
+    worker._desc_pos_by_block_size = {}
+    worker._dram_src_handles_by_block_size = {}
     worker.src_xfer_handles_by_block_size = {}
     worker.kv_caches_base_addr = defaultdict(dict)
     worker._mamba_ssm_size = (0, 0)
@@ -187,9 +189,9 @@ def test_overlaid_transfer_groups_share_region_geometry():
     worker._physical_blocks_per_logical_kv_block = 1
     worker._logical_num_blocks = num_blocks
     worker.region_mem_types = []
-    worker.region_strides = []
     worker.region_group_ids = []
-    worker.region_block_sizes = []
+    worker.region_mem_types = []
+    worker._mixed_mem_types = False
     worker.region_names = []
     worker.region_num_blocks = []
     worker._mixed_mem_types = False
@@ -208,7 +210,6 @@ def test_overlaid_transfer_groups_share_region_geometry():
     worker.pcp_size = 1
     worker.kv_buffer_device = "cuda"
     worker._layer_specs = {name: spec for name in caches}
-    worker._nixl_adapter = None
     worker.kv_cache_config = KVCacheConfig(
         num_blocks=num_blocks,
         kv_cache_tensors=[
@@ -233,7 +234,7 @@ def test_overlaid_transfer_groups_share_region_geometry():
         worker.register_kv_caches(caches)
 
     assert worker.region_group_ids == [-1]
-    assert worker.region_strides == [block_stride]
+    assert worker.block_stride_per_layer == [block_stride]
     assert worker.nixl_wrapper.registered[0][0] == [
         (backing.data_ptr(), backing.nbytes, 0, "")
     ]

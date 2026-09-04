@@ -222,6 +222,7 @@ class KVCacheCoordinator(ABC):
         num_local_computed_tokens: int,
         num_tokens_main_model: int,
         apply_admission_cap: bool = False,
+        hisparse_host_import: bool = False,
     ) -> int:
         return sum(
             self.get_num_blocks_to_allocate_by_pool(
@@ -233,6 +234,7 @@ class KVCacheCoordinator(ABC):
                 num_local_computed_tokens,
                 num_tokens_main_model,
                 apply_admission_cap=apply_admission_cap,
+                hisparse_host_import=hisparse_host_import,
             )
         )
 
@@ -251,25 +253,21 @@ class KVCacheCoordinator(ABC):
         """Get allocation requirements independently for each block pool."""
         needs_hot = self.hisparse_coordinator.needs_hot(new_computed_blocks)
         num_external_computed_tokens = total_computed_tokens - num_local_computed_tokens
+        host_import = hisparse_host_import and num_external_computed_tokens > 0
         required = [0] * len(self.block_pools)
         for i, manager in enumerate(self.single_type_managers):
             group = self.kv_cache_config.kv_cache_groups[i]
             if group.role is KVCacheGroupRole.HISPARSE_SOURCE:
                 continue
             assert group.block_pool_id is not None
-            if (
-                hisparse_host_import
-                and num_external_computed_tokens > 0
-                and isinstance(manager, HiSparseResidentManager)
-            ):
+            if host_import and isinstance(manager, HiSparseResidentManager):
                 num_blocks = manager.get_num_host_import_blocks_to_allocate(
                     request_id,
                     num_tokens,
                     num_local_computed_tokens,
                     num_external_computed_tokens,
-                    self.hisparse_coordinator.external_import_populates_resident_cache,
                 )
-            elif hisparse_host_import and isinstance(manager, HiSparseHotManager):
+            elif host_import and isinstance(manager, HiSparseHotManager):
                 num_blocks = manager.get_num_host_import_blocks_to_allocate(request_id)
             elif isinstance(manager, HiSparseHotManager) and needs_hot:
                 num_blocks = manager.get_num_required_blocks(request_id)
@@ -339,7 +337,8 @@ class KVCacheCoordinator(ABC):
             request_id,
             new_computed_blocks,
         )
-        if hisparse_host_import and num_external_computed_tokens > 0:
+        host_import = hisparse_host_import and num_external_computed_tokens > 0
+        if host_import:
             for manager in self.single_type_managers:
                 if isinstance(manager, HiSparseHotManager):
                     manager.require_hot(request_id)
@@ -348,7 +347,6 @@ class KVCacheCoordinator(ABC):
                         request_id,
                         num_local_computed_tokens,
                         num_external_computed_tokens,
-                        self.hisparse_coordinator.external_import_populates_resident_cache,
                     )
                 else:
                     manager.allocate_external_computed_blocks(
